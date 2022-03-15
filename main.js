@@ -1,9 +1,5 @@
 // https://bbs.cnool.net/10766678.html
 
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 var UIConfig = {
   WallColor: '#444444',
   LightColor: '#F5C400',
@@ -16,7 +12,12 @@ var UIConfig = {
   BulbBitmapOffsetXPX: 5,
   BulbBitmapOffsetYPX: 1,
   CellPX: 60,
-  GridLineWidthPX: 2
+  GridLineWidthPX: 2,
+  BulbResPath: 'res/bulb.png',
+  SoundDropResPath: 'res/drop.m4a',
+  SoundDropKey: 'drop',
+  SoundErrorResPath: 'res/error.m4a',
+  SoundErrorKey: 'error'
 }
 
 class Cell {
@@ -120,7 +121,7 @@ class FloorCell extends Cell {
     this.hasBulb = false;  // 是否有灯泡
 
     // 灯泡素材
-    this.bulbBitmap = new createjs.Bitmap('res/bulb.png');
+    this.bulbBitmap = new createjs.Bitmap(UIConfig.BulbResPath);
     this.bulbBitmap.image.onload = () => {
       stage.update();
     }
@@ -131,6 +132,7 @@ class FloorCell extends Cell {
   clicked(event) {
     this.hasBulb = !this.hasBulb;
     if (this.hasBulb) {
+      createjs.Sound.play(UIConfig.SoundDropKey);
       this.stage.addChild(this.bulbBitmap);
     } else {
       this.stage.removeChild(this.bulbBitmap);
@@ -160,6 +162,14 @@ class CellData {
     this.data = wallFloorData;
   }
 
+  get xCount() {
+    return this.data[0].length;
+  }
+
+  get yCount() {
+    return this.data.length;
+  }
+
   isWall(x, y) {
     var d = this.data[x][y];
     return d=='-' || this.isNumberWall(x, y);
@@ -179,12 +189,12 @@ class CellData {
 }
 
 class CellManager {
-  constructor(stage, square, xCount, yCount, cellData) {
+  constructor(stage, square, cellData) {
     this.stage = stage;
     this.square = square;
-    this.xCount = xCount;
-    this.yCount = yCount;
-    this._initCells(xCount, yCount, cellData);
+    this.xCount = cellData.xCount;
+    this.yCount = cellData.yCount;
+    this._initCells(this.xCount, this.yCount, cellData);
   }
 
   _initCells(xCount, yCount, cellData) {
@@ -226,6 +236,7 @@ class CellManager {
         }
       }
     }
+    var hasError = false;
     // 填充灯光并检查是否有灯泡互相照射
     for (let i = 0; i < this.cells.length; i++) {
       var cellRow = this.cells[i];
@@ -238,6 +249,7 @@ class CellManager {
               break;
             } else if (cellRow[k].hasBulb) {
               cellRow[j].hasError = cellRow[k].hasError = true;
+              hasError = true;
             } else {
               cellRow[k].hasLight = true;;
             }
@@ -247,6 +259,7 @@ class CellManager {
               break;
             } else if (cellRow[k].hasBulb) {
               cellRow[j].hasError = cellRow[k].hasError = true;
+              hasError = true;
             } else {
               cellRow[k].hasLight = true;
             }
@@ -257,6 +270,7 @@ class CellManager {
               break;
             } else if (this.cells[k][j].hasBulb) {
               this.cells[k][j].hasError = this.cells[i][j].hasError = true;
+              hasError = true;
             } else {
               this.cells[k][j].hasLight = true;
             }
@@ -266,6 +280,7 @@ class CellManager {
               break;
             } else if (this.cells[k][j].hasBulb) {
               this.cells[k][j].hasError = this.cells[i][j].hasError = true;
+              hasError = true;
             } else {
               this.cells[k][j].hasLight = true;
             }
@@ -273,13 +288,14 @@ class CellManager {
         }
       }
     }
-    // 检查障碍块数字是否符合
+    // 检查障碍块数字是否符合，要同时检查有没有少于数字
     for (let i = 0; i < this.cells.length; i++) {
       var cellRow = this.cells[i];
       for (let j = 0; j < cellRow.length; j++) {
-        var cell = cellRow[j];
-        if (cell.isNumberWall()) {
-          var amount = cell.number;
+        var currentCell = cellRow[j];
+        if (currentCell.isNumberWall()) {
+          // 是不是超了
+          var amount = currentCell.number;
           if (i > 0 && this.cells[i-1][j].hasBulb) {
             amount--;
           }
@@ -293,26 +309,70 @@ class CellManager {
             amount--;
           }
           if (amount < 0) {
-            cell.hasError = true;
+            currentCell.hasError = true;
+            hasError = true;
+            continue;
+          }
+          // 是不是不够，不够的前提是四面都被照亮（或者是墙）
+          amount = currentCell.number;
+          if (i > 0) {
+            var cell = this.cells[i-1][j];
+            if (!cell.isWall() && !cell.hasLight) {
+              continue;
+            } else if (cell.hasBulb) {
+              amount--;
+            }
+          }
+          if (i < this.yCount-1) {
+            var cell = this.cells[i+1][j];
+            if (!cell.isWall() && !cell.hasLight) {
+              continue;
+            } else if (cell.hasBulb) {
+              amount--;
+            }            
+          }
+          if (j > 0) {
+            var cell = cellRow[j-1];
+            if (!cell.isWall() && !cell.hasLight) {
+              continue;
+            } else if (cell.hasBulb) {
+              amount--;
+            }
+          }
+          if (j < this.xCount-1) {
+            var cell = cellRow[j+1];
+            if (!cell.isWall() && !cell.hasLight) {
+              continue;
+            } else if (cell.hasBulb) {
+              amount--;
+            }
+          }
+          if (amount > 0) {
+            currentCell.hasError = true;
+            hasError = true;
           }
         }
       }
     }
     this.square.render();
     this.stage.update();
+
+    if (hasError) {
+      createjs.Sound.play(UIConfig.SoundErrorKey);
+    }
   }
 }
 
 class Square {
-  constructor(stage, xCount, yCount, initedCellData) {
-    this.xCount = xCount;
-    this.yCount = yCount;
+  constructor(stage, initedCellData) {
+    this.xCount = initedCellData.xCount;
+    this.yCount = initedCellData.yCount;
     this.startX = 2;
     this.startY = 2;
     this.stage = stage;
 
     // 初始化 Cell 管理器
-    this.cellManager = new CellManager(this.stage, this, xCount, yCount, initedCellData);
+    this.cellManager = new CellManager(this.stage, this, initedCellData);
 
     // 网格要浮在最上面，因此最后才 add
     this.gridShape = new createjs.Shape();
@@ -343,39 +403,74 @@ class Square {
   }
 }
 
-async function init() {
-  var stage = new createjs.Stage("demoCanvas");
+function init() {
+  // 加载声音
+  createjs.Sound.registerSound(UIConfig.SoundDropResPath, UIConfig.SoundDropKey);
+  createjs.Sound.registerSound(UIConfig.SoundErrorResPath, UIConfig.SoundErrorKey);
+
+  // 渲染画布
+  var stage = new createjs.Stage("stage");
   createjs.Touch.enable(stage);
 
-  var data = new CellData([
-    [' ', ' ', ' ', ' ', ' ', '-', '1', ' ', '-', '-', ' ', ' ', '-', ' '],
-    [' ', ' ', ' ', '-', ' ', ' ', ' ', ' ', '2', ' ', '-', ' ', '-', ' '],
-    [' ', '2', ' ', ' ', ' ', ' ', '1', ' ', ' ', ' ', '-', ' ', ' ', ' '],
-    [' ', '0', ' ', ' ', ' ', ' ', ' ', '-', ' ', ' ', ' ', '2', ' ', ' '],
-    [' ', '0', ' ', ' ', ' ', ' ', ' ', '-', ' ', '2', ' ', ' ', '-', ' '],
-    ['-', ' ', '-', '-', '-', ' ', '1', '-', ' ', ' ', ' ', '-', ' ', ' '],
-    [' ', ' ', ' ', ' ', ' ', ' ', ' ', '1', ' ', ' ', ' ', ' ', ' ', '0'],
-    ['0', ' ', ' ', ' ', ' ', ' ', '-', ' ', ' ', ' ', ' ', ' ', ' ', ' '],
-    [' ', ' ', '2', ' ', ' ', ' ', '-', '-', ' ', '0', '-', '0', ' ', '1'],
-    [' ', '2', ' ', ' ', '-', ' ', '-', ' ', ' ', ' ', ' ', ' ', '-', ' '],
-    [' ', ' ', '-', ' ', ' ', ' ', '1', ' ', ' ', '2', ' ', ' ', '-', ' '],
-    [' ', ' ', ' ', '-', ' ', ' ', ' ', '-', ' ', ' ', ' ', ' ', '-', ' '],
-    [' ', '0', ' ', '-', ' ', '-', ' ', ' ', ' ', ' ', '0', ' ', ' ', ' '],
-    [' ', '0', ' ', ' ', '1', '-', ' ', '2', '-', ' ', ' ', ' ', ' ', ' ']
-  ]);
-  var square = new Square(stage, 14, 14, data);
+  var levels = [
+    [
+      [' ', ' ', ' ', ' ', ' ', '-', '1', ' ', '-', '-', ' ', ' ', '-', ' '],
+      [' ', ' ', ' ', '-', ' ', ' ', ' ', ' ', '2', ' ', '-', ' ', '-', ' '],
+      [' ', '2', ' ', ' ', ' ', ' ', '1', ' ', ' ', ' ', '-', ' ', ' ', ' '],
+      [' ', '0', ' ', ' ', ' ', ' ', ' ', '-', ' ', ' ', ' ', '2', ' ', ' '],
+      [' ', '0', ' ', ' ', ' ', ' ', ' ', '-', ' ', '2', ' ', ' ', '-', ' '],
+      ['-', ' ', '-', '-', '-', ' ', '1', '-', ' ', ' ', ' ', '-', ' ', ' '],
+      [' ', ' ', ' ', ' ', ' ', ' ', ' ', '1', ' ', ' ', ' ', ' ', ' ', '0'],
+      ['0', ' ', ' ', ' ', ' ', ' ', '-', ' ', ' ', ' ', ' ', ' ', ' ', ' '],
+      [' ', ' ', '2', ' ', ' ', ' ', '-', '-', ' ', '0', '-', '0', ' ', '1'],
+      [' ', '2', ' ', ' ', '-', ' ', '-', ' ', ' ', ' ', ' ', ' ', '-', ' '],
+      [' ', ' ', '-', ' ', ' ', ' ', '1', ' ', ' ', '2', ' ', ' ', '-', ' '],
+      [' ', ' ', ' ', '-', ' ', ' ', ' ', '-', ' ', ' ', ' ', ' ', '-', ' '],
+      [' ', '0', ' ', '-', ' ', '-', ' ', ' ', ' ', ' ', '0', ' ', ' ', ' '],
+      [' ', '0', ' ', ' ', '1', '-', ' ', '2', '-', ' ', ' ', ' ', ' ', ' ']
+    ],
+    [
+      [' ', '1', ' ', ' ', ' ', '-', ' ', ' ', ' ', ' ', ' ', ' ', '', ' '],
+      [' ', '1', ' ', ' ', ' ', '1', '0', ' ', ' ', '2', '-', '-', '-', ' '],
+      ['-', ' ', ' ', ' ', ' ', '1', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '1'],
+      ['-', ' ', ' ', ' ', '-', ' ', ' ', '1', ' ', '-', ' ', ' ', '-', ' '],
+      [' ', '2', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '],
+      [' ', ' ', ' ', '1', ' ', ' ', ' ', ' ', '1', '-', ' ', ' ', ' ', ' '],
+      [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '1', '-', ' ', ' ', '-'],
+      ['1', ' ', ' ', '1', '1', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '],
+      [' ', ' ', ' ', ' ', '1', '-', ' ', ' ', ' ', ' ', '1', ' ', ' ', ' '],
+      [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '-', ' '],
+      [' ', '-', ' ', ' ', '1', ' ', '1', ' ', ' ', '0', ' ', ' ', ' ', '1'],
+      ['-', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '-', ' ', ' ', ' ', ' ', '-'],
+      [' ', '2', '-', '0', '2', ' ', ' ', '-', '-', ' ', ' ', ' ', '-', ' '],
+      [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '0', ' ', ' ', ' ', '1', ' ']
+    ],
+    [
+      [' ', '1', ' ', ' ', ' ', '-', ' ', ' '],
+      [' ', '1', ' ', ' ', ' ', '1', '0', ' '],
+      ['-', ' ', ' ', ' ', ' ', '1', ' ', ' '],
+      ['-', ' ', ' ', ' ', '-', ' ', ' ', '1'],
+      [' ', '2', ' ', ' ', ' ', ' ', ' ', ' '],
+      [' ', ' ', ' ', '-', ' ', ' ', ' ', ' '],
+      [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '],
+      ['0', ' ', ' ', '1', '1', ' ', ' ', ' ']
+    ],
+    [
+      [' ', '1', ' ', ' '],
+      [' ', '1', ' ', ' '],
+      ['-', ' ', ' ', ' '],
+      ['-', ' ', ' ', ' ']
+    ],
+    [
+      [' ', ' ', ' '],
+      [' ', '2', ' '],
+      [' ', ' ', ' '],
+    ],
+  ]
+
+  var data = new CellData(levels[1]);
+  var square = new Square(stage, data);
   window.square = square;
   square.render();
-
-  {
-    // var img = new createjs.Bitmap('res/bulb.png');
-    // img.image.onload = () => {
-    //   stage.update();
-    // }
-    // stage.addChild(img);
-    // img.x = 100;
-    // img.y = 100;
-  }
-
   stage.update();
 }
